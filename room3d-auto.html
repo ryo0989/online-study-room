@@ -472,12 +472,12 @@
 // ════════════════════════════════════════════════════════
 //  Constants & Helpers
 // ════════════════════════════════════════════════════════
-const TOTAL_SEATS = 8;
-const MY_SEAT_KEY = 'studyroom_auto_seat_v1';
+const TOTAL_SEATS = 16;
+const MY_SEAT_KEY = 'studyroom_auto_seat_v2';
 
 // ── Auto-fill bot data ──────────────────────────────────
-const CENTER_SEATS  = [4, 5, 6, 7]; // 0-indexed (seats 5-8)
-const CORNER_SEATS  = [0, 1, 2, 3]; // 0-indexed (seats 1-4)
+const CENTER_SEATS  = [5, 6, 9, 10]; // 0-indexed — inner 2×2 (seats 6,7,10,11)
+const CORNER_SEATS  = [0, 3, 12, 15]; // 0-indexed — four corners (seats 1,4,13,16)
 
 const BOT_NAMES = ['田中 蓮', '佐藤 葵', '鈴木 颯', '高橋 結', '伊藤 湊', '渡辺 陽', '山本 凛', '中村 悠'];
 const BOT_TASKS = {
@@ -565,7 +565,7 @@ renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type    = THREE.PCFSoftShadowMap;
 renderer.toneMapping       = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 0.92;
+renderer.toneMappingExposure = 1.18;
 document.body.appendChild(renderer.domElement);
 
 // CSS2D label renderer
@@ -590,9 +590,9 @@ controls.target.set(0, 1, 0);
 // ════════════════════════════════════════════════════════
 //  Lighting
 // ════════════════════════════════════════════════════════
-scene.add(new THREE.AmbientLight(0xffeedd, 0.28));
+scene.add(new THREE.AmbientLight(0xffeedd, 0.55));
 
-const sunLight = new THREE.DirectionalLight(0xc5e8ff, 0.72);
+const sunLight = new THREE.DirectionalLight(0xc5e8ff, 1.1);
 sunLight.position.set(-11, 9, 5);
 sunLight.castShadow = true;
 sunLight.shadow.mapSize.set(1024, 1024);
@@ -601,13 +601,21 @@ sc.left = sc.bottom = -14; sc.right = sc.top = 14;
 sc.near = 0.5; sc.far = 40;
 scene.add(sunLight);
 
-const pl1 = new THREE.PointLight(0xffe898, 1.7, 15);
-pl1.position.set(-3.5, 4.1, -2);
+const pl1 = new THREE.PointLight(0xffe898, 2.4, 16);
+pl1.position.set(-3, 4.1, -3.8);
 scene.add(pl1);
 
-const pl2 = new THREE.PointLight(0xffe898, 1.7, 15);
-pl2.position.set(3.5, 4.1, -2);
+const pl2 = new THREE.PointLight(0xffe898, 2.4, 16);
+pl2.position.set(3, 4.1, -3.8);
 scene.add(pl2);
+
+const pl3 = new THREE.PointLight(0xffe898, 2.2, 16);
+pl3.position.set(-3, 4.1, 2.2);
+scene.add(pl3);
+
+const pl4 = new THREE.PointLight(0xffe898, 2.2, 16);
+pl4.position.set(3, 4.1, 2.2);
+scene.add(pl4);
 
 // ════════════════════════════════════════════════════════
 //  Room — Floor, Walls, Ceiling
@@ -760,8 +768,10 @@ function addPendant(x, z) {
   scene.add(bulb);
 }
 
-addPendant(-3.5, -2);
-addPendant( 3.5, -2);
+addPendant(-3, -3.8);
+addPendant( 3, -3.8);
+addPendant(-3,  2.2);
+addPendant( 3,  2.2);
 
 // ════════════════════════════════════════════════════════
 //  Desk Creation
@@ -826,34 +836,58 @@ function createDesk(x, z) {
 }
 
 // ════════════════════════════════════════════════════════
-//  Seat Layout  (corners + center cluster, matching 2D)
+//  Seat Layout  (4 × 4 grid)
 // ════════════════════════════════════════════════════════
 const SEAT_POS = [
-  { x: -7.2, z: -5.5 }, // 1  TL corner
-  { x:  7.2, z: -5.5 }, // 2  TR corner
-  { x: -7.2, z:  5.5 }, // 3  BL corner
-  { x:  7.2, z:  5.5 }, // 4  BR corner
-  { x: -1.5, z: -1.1 }, // 5  center cluster
-  { x:  1.5, z: -1.1 }, // 6
-  { x: -1.5, z:  1.1 }, // 7
-  { x:  1.5, z:  1.1 }, // 8
+  // Row 1 – back (z = −5.5)
+  { x: -6.0, z: -5.5 }, // 1
+  { x: -2.0, z: -5.5 }, // 2
+  { x:  2.0, z: -5.5 }, // 3
+  { x:  6.0, z: -5.5 }, // 4
+  // Row 2 (z = −1.8)
+  { x: -6.0, z: -1.8 }, // 5
+  { x: -2.0, z: -1.8 }, // 6
+  { x:  2.0, z: -1.8 }, // 7
+  { x:  6.0, z: -1.8 }, // 8
+  // Row 3 (z = 1.8)
+  { x: -6.0, z:  1.8 }, // 9
+  { x: -2.0, z:  1.8 }, // 10
+  { x:  2.0, z:  1.8 }, // 11
+  { x:  6.0, z:  1.8 }, // 12
+  // Row 4 – front (z = 5.5)
+  { x: -6.0, z:  5.5 }, // 13
+  { x: -2.0, z:  5.5 }, // 14
+  { x:  2.0, z:  5.5 }, // 15
+  { x:  6.0, z:  5.5 }, // 16
 ];
 
 const deskGroups  = SEAT_POS.map(p => createDesk(p.x, p.z));
 const deskTopMesh = deskGroups.map(g => g.children[0]); // top surface per desk
 
-// Label 3D positions — center cluster cards pushed outward to prevent overlap.
-// Camera is at (0,15,19): back seats project high, front seats project low on screen.
-// Pushing X outward (±4) widens L/R spread; pushing Z and Y separates rows vertically.
+// Label 3D positions — inner columns pushed outward in X to avoid overlap.
+// Camera is at (0,15,19): back rows project high, front rows project low.
+// Y height decreases front-to-back to maintain visual separation.
 const LABEL_POS = [
-  { x: -7.2, y: DESK_TOP_Y + 1.4, z: -5.5 }, // 1 TL corner
-  { x:  7.2, y: DESK_TOP_Y + 1.4, z: -5.5 }, // 2 TR corner
-  { x: -7.2, y: DESK_TOP_Y + 1.4, z:  5.5 }, // 3 BL corner
-  { x:  7.2, y: DESK_TOP_Y + 1.4, z:  5.5 }, // 4 BR corner
-  { x: -4.0, y: DESK_TOP_Y + 2.0, z: -2.4 }, // 5 center back-left  → upper-left on screen
-  { x:  4.0, y: DESK_TOP_Y + 2.0, z: -2.4 }, // 6 center back-right → upper-right
-  { x: -4.0, y: DESK_TOP_Y + 1.1, z:  2.4 }, // 7 center front-left → lower-left
-  { x:  4.0, y: DESK_TOP_Y + 1.1, z:  2.4 }, // 8 center front-right→ lower-right
+  // Row 1 – back (z=-5.5): highest on screen
+  { x: -6.5, y: DESK_TOP_Y + 2.0, z: -5.5 }, // 1
+  { x: -3.5, y: DESK_TOP_Y + 2.4, z: -5.5 }, // 2 inner → push y up & x out
+  { x:  3.5, y: DESK_TOP_Y + 2.4, z: -5.5 }, // 3
+  { x:  6.5, y: DESK_TOP_Y + 2.0, z: -5.5 }, // 4
+  // Row 2 (z=-1.8)
+  { x: -6.5, y: DESK_TOP_Y + 1.8, z: -1.8 }, // 5
+  { x: -3.5, y: DESK_TOP_Y + 1.8, z: -1.8 }, // 6
+  { x:  3.5, y: DESK_TOP_Y + 1.8, z: -1.8 }, // 7
+  { x:  6.5, y: DESK_TOP_Y + 1.8, z: -1.8 }, // 8
+  // Row 3 (z=1.8)
+  { x: -6.5, y: DESK_TOP_Y + 1.5, z:  1.8 }, // 9
+  { x: -3.5, y: DESK_TOP_Y + 1.5, z:  1.8 }, // 10
+  { x:  3.5, y: DESK_TOP_Y + 1.5, z:  1.8 }, // 11
+  { x:  6.5, y: DESK_TOP_Y + 1.5, z:  1.8 }, // 12
+  // Row 4 – front (z=5.5): lowest on screen
+  { x: -6.5, y: DESK_TOP_Y + 1.2, z:  5.5 }, // 13
+  { x: -3.5, y: DESK_TOP_Y + 1.2, z:  5.5 }, // 14
+  { x:  3.5, y: DESK_TOP_Y + 1.2, z:  5.5 }, // 15
+  { x:  6.5, y: DESK_TOP_Y + 1.2, z:  5.5 }, // 16
 ];
 
 // ════════════════════════════════════════════════════════
@@ -1016,6 +1050,8 @@ function updateSeatCard(i, seat) {
     if (wasOccupied) {
       div.classList.add('leave');
       div.addEventListener('animationend', () => {
+        // Guard: if re-occupied before animation ended, don't clear
+        if (orbSprings[i].target > 0.5) return;
         div.className = 'seat-card empty';
         div.innerHTML = `<div class="sc-no">No.${i + 1}</div><div class="sc-plus">+</div><div class="sc-empty">空席</div>`;
       }, { once: true });
@@ -1133,8 +1169,8 @@ if (isConfigured) {
 
   firebase.initializeApp(FIREBASE_CONFIG);
   db        = firebase.database();
-  seatsRef  = db.ref('seats_auto');
-  configRef = db.ref('config_auto');
+  seatsRef  = db.ref('seats_auto_4x4');
+  configRef = db.ref('config_auto_4x4');
 
   seatsRef.once('value', snap => {
     if (!snap.exists()) {
@@ -1389,8 +1425,10 @@ function animate() {
   const t  = Date.now() * 0.001;
   const dt = Math.min(clock.getDelta(), 0.05); // cap at 50ms
 
-  pl1.intensity = 1.6 + Math.sin(t * 0.71) * 0.12;
-  pl2.intensity = 1.6 + Math.sin(t * 0.53 + 1.3) * 0.12;
+  pl1.intensity = 2.3 + Math.sin(t * 0.71) * 0.12;
+  pl2.intensity = 2.3 + Math.sin(t * 0.53 + 1.3) * 0.12;
+  pl3.intensity = 2.1 + Math.sin(t * 0.67 + 0.8) * 0.12;
+  pl4.intensity = 2.1 + Math.sin(t * 0.43 + 2.1) * 0.12;
 
   // ── Spring-physics orb animation ──────────────────────
   // K = stiffness (higher → snappier), D = damping (higher → less bounce)
@@ -1402,7 +1440,7 @@ function animate() {
     if (sp.s < 0) { sp.s = 0; sp.v = Math.abs(sp.v) * 0.4; } // floor bounce
 
     const fig = avatarFigures[i].group;
-    fig.scale.setScalar(sp.s);
+    fig.scale.setScalar(sp.s * 2);
 
     if (sp.target > 0.5) {
       // Subtle breathing sway — seated figure slightly rocks forward/back
