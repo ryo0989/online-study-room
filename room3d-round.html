@@ -1,0 +1,1448 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>オンライン自習室 3D - 丸テーブル</title>
+
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/renderers/CSS2DRenderer.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --accent: #f0a500;
+      --text:   #e2d9c8;
+      --subtle: #9a8878;
+    }
+
+    body {
+      font-family: 'Segoe UI', 'Hiragino Sans', sans-serif;
+      overflow: hidden;
+      background: #080300;
+      user-select: none;
+      color: var(--text);
+    }
+
+    canvas { display: block; }
+
+    #label-layer {
+      position: fixed; inset: 0;
+      pointer-events: none;
+      overflow: hidden;
+    }
+
+    /* ── Seat floating cards ─────────────────────────────── */
+    .seat-card {
+      background: rgba(18, 9, 2, 0.9);
+      border: 1px solid rgba(240,165,0,0.3);
+      border-radius: 12px;
+      padding: 9px 14px 8px;
+      text-align: center;
+      min-width: 112px;
+      backdrop-filter: blur(8px);
+      pointer-events: auto;
+      cursor: default;
+      transition: transform 0.2s;
+    }
+
+    .seat-card.empty {
+      background: rgba(255,255,255,0.04);
+      border: 1.5px dashed rgba(255,255,255,0.14);
+      cursor: pointer;
+    }
+
+    .seat-card.empty:hover { transform: scale(1.1); }
+
+    .seat-card .sc-no {
+      font-size: 0.62rem; color: rgba(255,255,255,0.22);
+      letter-spacing: 0.1em; margin-bottom: 4px;
+    }
+
+    .seat-card .sc-avatar {
+      width: 38px; height: 38px; border-radius: 50%;
+      margin: 0 auto 6px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.1rem; font-weight: 700; color: #fff;
+      border: 2px solid rgba(255,255,255,0.2);
+    }
+
+    .seat-card .sc-name {
+      font-size: 0.84rem; font-weight: 600; color: #fff;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      max-width: 100px;
+    }
+
+    .seat-card .sc-task {
+      font-size: 0.71rem; color: #f5c870; margin-top: 2px;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      max-width: 100px; opacity: 0.9;
+    }
+
+    .seat-card .sc-plus  { font-size: 1.6rem; color: rgba(240,165,0,0.3); line-height: 1.3; }
+    .seat-card .sc-empty { font-size: 0.7rem; color: rgba(255,255,255,0.2); }
+
+    .sc-dot {
+      width: 7px; height: 7px; border-radius: 50%;
+      background: #4caf50; box-shadow: 0 0 5px #4caf50;
+      margin: 5px auto 0;
+      animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+    @keyframes seatCardIn {
+      0%   { transform: scale(0.3) translateY(14px); opacity: 0; }
+      55%  { transform: scale(1.12) translateY(-6px); opacity: 1; }
+      78%  { transform: scale(0.94) translateY(1px); }
+      100% { transform: scale(1) translateY(0); opacity: 1; }
+    }
+
+    @keyframes seatCardOut {
+      0%   { transform: scale(1); opacity: 1; }
+      100% { transform: scale(0.3) translateY(10px); opacity: 0; }
+    }
+
+    .seat-card.arrive { animation: seatCardIn 0.55s cubic-bezier(0.34, 1.56, 0.64, 1) both; }
+    .seat-card.leave  { animation: seatCardOut 0.3s ease-in both; }
+
+    /* ── HUD ─────────────────────────────────────────────── */
+    .hud {
+      position: fixed; top: 16px; left: 50%;
+      transform: translateX(-50%);
+      text-align: center; z-index: 200; pointer-events: none;
+      white-space: nowrap;
+    }
+
+    .hud-time {
+      font-size: 2.8rem; font-weight: 200;
+      letter-spacing: 0.05em; color: #fff; line-height: 1;
+      text-shadow: 0 0 20px rgba(240,165,0,0.45);
+    }
+
+    .hud-date { font-size: 0.88rem; color: rgba(255,255,255,0.45); margin-top: 4px; }
+
+    .hud-people {
+      margin-top: 8px; font-size: 1rem; color: var(--accent);
+      display: flex; align-items: center; justify-content: center; gap: 6px;
+    }
+
+    .hud-people svg { width: 16px; height: 16px; fill: var(--accent); }
+
+    /* ── Connection badge ──────────────────────────────────── */
+    .conn-badge {
+      position: fixed; top: 20px; left: 20px;
+      display: flex; align-items: center; gap: 6px;
+      font-size: 0.78rem; color: rgba(255,255,255,0.4);
+      z-index: 200; pointer-events: none; transition: color 0.3s;
+    }
+
+    .conn-dot {
+      width: 7px; height: 7px; border-radius: 50%;
+      background: #555; transition: background 0.3s, box-shadow 0.3s;
+    }
+
+    .conn-badge.online .conn-dot { background: #4caf50; box-shadow: 0 0 6px #4caf50; }
+    .conn-badge.online           { color: rgba(100,220,100,0.8); }
+    .conn-badge.offline .conn-dot { background: #f44336; }
+    .conn-badge.offline           { color: rgba(255,100,100,0.8); }
+
+    /* ── Leave panel ───────────────────────────────────────── */
+    #leave-panel {
+      position: fixed; bottom: 24px; left: 50%;
+      transform: translateX(-50%);
+      display: none; align-items: center; gap: 16px;
+      background: rgba(18, 9, 2, 0.92);
+      border: 1px solid rgba(240,165,0,0.35);
+      border-radius: 40px; padding: 11px 14px 11px 20px;
+      backdrop-filter: blur(8px);
+      box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+      z-index: 300; white-space: nowrap;
+    }
+
+    #leave-seat-info { font-size: 0.9rem; color: var(--text); }
+    #leave-seat-info strong { color: var(--accent); font-weight: 700; }
+
+    #leave-btn-main {
+      background: rgba(210, 55, 55, 0.85);
+      border: 1px solid rgba(255,80,80,0.4);
+      border-radius: 24px; color: #fff;
+      font-size: 0.88rem; font-weight: 600;
+      padding: 8px 20px; cursor: pointer;
+      transition: background 0.2s, transform 0.15s;
+    }
+
+    #leave-btn-main:hover { background: rgba(220,60,60,1); transform: scale(1.03); }
+    #leave-btn-main:active { transform: scale(0.97); }
+
+    /* ── Music Player ──────────────────────────────────────── */
+    .music-player {
+      position: fixed; bottom: 24px; left: 24px;
+      display: flex; align-items: center; gap: 12px; z-index: 200;
+    }
+
+    .music-toggle {
+      width: 46px; height: 46px; border-radius: 50%;
+      background: rgba(240,165,0,0.1);
+      border: 1px solid rgba(240,165,0,0.22);
+      cursor: pointer; display: flex; align-items: center; justify-content: center;
+      transition: all 0.2s; color: var(--accent);
+    }
+
+    .music-toggle:hover { background: rgba(240,165,0,0.2); transform: scale(1.06); }
+    .music-toggle.playing { box-shadow: 0 0 16px rgba(240,165,0,0.35); background: rgba(240,165,0,0.18); }
+
+    .music-label { font-size: 0.78rem; color: rgba(255,255,255,0.35); }
+    .music-bars { display: flex; align-items: flex-end; gap: 2px; height: 14px; }
+    .music-bars span { display: block; width: 3px; background: var(--accent); border-radius: 2px; }
+
+    .music-bars.active span:nth-child(1) { animation: bar 0.8s ease-in-out infinite; }
+    .music-bars.active span:nth-child(2) { animation: bar 0.8s ease-in-out 0.15s infinite; }
+    .music-bars.active span:nth-child(3) { animation: bar 0.8s ease-in-out 0.3s infinite; }
+    .music-bars.active span:nth-child(4) { animation: bar 0.8s ease-in-out 0.1s infinite; }
+
+    @keyframes bar { 0%,100%{height:4px} 50%{height:14px} }
+
+    /* ── Modal ─────────────────────────────────────────────── */
+    .modal-overlay {
+      position: fixed; inset: 0;
+      background: rgba(10,5,0,0.80);
+      backdrop-filter: blur(6px);
+      display: flex; align-items: center; justify-content: center;
+      z-index: 500; opacity: 0; pointer-events: none; transition: opacity 0.2s;
+    }
+
+    .modal-overlay.open { opacity: 1; pointer-events: all; }
+
+    .modal {
+      background: #1e1208;
+      border: 1px solid rgba(240,165,0,0.18);
+      border-radius: 16px; padding: 32px 36px; width: 340px;
+      box-shadow: 0 24px 80px rgba(0,0,0,0.85);
+      transform: translateY(20px) scale(0.96); transition: transform 0.25s;
+    }
+
+    .modal-overlay.open .modal { transform: translateY(0) scale(1); }
+
+    .modal h2 { font-size: 1.15rem; font-weight: 600; color: var(--accent); margin-bottom: 5px; }
+    .modal .modal-sub { font-size: 0.8rem; color: var(--subtle); margin-bottom: 22px; }
+
+    .form-group { margin-bottom: 15px; }
+
+    .form-group label {
+      display: block; font-size: 0.78rem; color: var(--subtle);
+      margin-bottom: 6px; letter-spacing: 0.06em;
+    }
+
+    .form-group input {
+      width: 100%; background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 8px; padding: 11px 14px;
+      color: var(--text); font-size: 0.92rem; outline: none; transition: border-color 0.2s;
+    }
+
+    .form-group input:focus { border-color: rgba(240,165,0,0.5); background: rgba(255,255,255,0.08); }
+    .form-group input::placeholder { color: var(--subtle); }
+
+    .modal-actions { display: flex; gap: 10px; margin-top: 22px; }
+
+    .btn { flex: 1; padding: 12px; border-radius: 8px; border: none; font-size: 0.92rem; cursor: pointer; transition: all 0.2s; }
+    .btn-primary { background: var(--accent); color: #000; font-weight: 700; }
+    .btn-primary:hover { background: #ffc107; transform: translateY(-1px); }
+    .btn-secondary { background: rgba(255,255,255,0.06); color: var(--subtle); }
+    .btn-secondary:hover { background: rgba(255,255,255,0.1); }
+
+    /* ── Toast ─────────────────────────────────────────────── */
+    .toast {
+      position: fixed; bottom: 84px; left: 50%;
+      transform: translateX(-50%) translateY(14px);
+      background: rgba(20,10,0,0.96);
+      border: 1px solid rgba(240,165,0,0.28);
+      color: var(--accent); padding: 10px 22px;
+      border-radius: 24px; font-size: 0.85rem;
+      opacity: 0; transition: all 0.3s; pointer-events: none; z-index: 600;
+    }
+
+    .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+    /* ── Setup overlay ─────────────────────────────────────── */
+    #setup-overlay {
+      position: fixed; inset: 0; z-index: 900;
+      background: rgba(5,3,0,0.97); backdrop-filter: blur(8px);
+      display: flex; align-items: center; justify-content: center;
+      flex-direction: column; gap: 20px; padding: 32px;
+    }
+
+    #setup-overlay h1 { font-size: 1.4rem; color: var(--accent); font-weight: 600; }
+    #setup-overlay p  { color: var(--subtle); font-size: 0.86rem; text-align: center; max-width: 480px; line-height: 1.8; }
+
+    #setup-overlay code {
+      background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 8px; padding: 16px 20px; display: block;
+      white-space: pre; font-size: 0.77rem; color: #a9c;
+      max-width: 540px; width: 100%; overflow-x: auto;
+    }
+
+    #setup-overlay a { color: var(--accent); font-size: 0.82rem; }
+
+    /* ── Camera hint ───────────────────────────────────────── */
+    .cam-hint {
+      position: fixed; bottom: 24px; right: 24px;
+      font-size: 0.7rem; color: rgba(255,255,255,0.18);
+      z-index: 200; pointer-events: none;
+      text-align: right; line-height: 1.7;
+    }
+
+    /* ── Admin Panel ────────────────────────────────────────── */
+    #admin-panel {
+      position: fixed; top: 16px; right: 16px; z-index: 300;
+    }
+
+    #admin-toggle {
+      background: rgba(240,165,0,0.12);
+      border: 1px solid rgba(240,165,0,0.3);
+      border-radius: 20px; color: var(--accent);
+      font-size: 0.78rem; padding: 6px 14px; cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    #admin-toggle:hover { background: rgba(240,165,0,0.22); }
+
+    #admin-content {
+      display: none;
+      margin-top: 8px;
+      background: rgba(18, 9, 2, 0.95);
+      border: 1px solid rgba(240,165,0,0.25);
+      border-radius: 12px; padding: 16px 18px;
+      backdrop-filter: blur(8px);
+      min-width: 200px;
+    }
+
+    #admin-content.open { display: block; }
+
+    #admin-content .admin-title {
+      font-size: 0.72rem; color: var(--subtle);
+      letter-spacing: 0.08em; margin-bottom: 12px;
+      text-transform: uppercase;
+    }
+
+    .fill-mode-label {
+      display: flex; align-items: center; gap: 8px;
+      font-size: 0.85rem; color: var(--text);
+      padding: 8px 10px; border-radius: 8px;
+      cursor: pointer; transition: background 0.15s;
+      margin-bottom: 4px;
+    }
+
+    .fill-mode-label:hover { background: rgba(255,255,255,0.05); }
+    .fill-mode-label input[type="radio"] { accent-color: var(--accent); width: 15px; height: 15px; }
+    .fill-mode-label .mode-icon { font-size: 1rem; }
+
+    .admin-status {
+      margin-top: 12px; padding-top: 10px;
+      border-top: 1px solid rgba(255,255,255,0.07);
+      font-size: 0.73rem; color: var(--subtle); text-align: center;
+    }
+
+    .admin-status span { color: var(--accent); font-weight: 600; }
+  </style>
+</head>
+<body>
+
+<!-- ════ Firebase Config ════════════════════════════════════ -->
+<script>
+  const FIREBASE_CONFIG = {
+    apiKey:            "AIzaSyAJaCAALKzdFOqL8Zj8NC5bXl38tntrfoA",
+    authDomain:        "study-room2-7ba95.firebaseapp.com",
+    databaseURL:       "https://study-room2-7ba95-default-rtdb.firebaseio.com",
+    projectId:         "study-room2-7ba95",
+    storageBucket:     "study-room2-7ba95.firebasestorage.app",
+    messagingSenderId: "699582567966",
+    appId:             "1:699582567966:web:a1b3d3f378ddd94919800f",
+    measurementId:     "G-2GS82TFKSZ"
+  };
+</script>
+
+<!-- ════ HTML UI overlays ════════════════════════════════════ -->
+<div class="conn-badge" id="conn-badge">
+  <div class="conn-dot"></div>
+  <span id="conn-label">接続中...</span>
+</div>
+
+<div class="hud">
+  <div class="hud-time" id="hud-time">00:00</div>
+  <div class="hud-date"  id="hud-date"></div>
+  <div class="hud-people">
+    <svg viewBox="0 0 24 24"><path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg>
+    <span id="people-count">— 人 在室</span>
+  </div>
+</div>
+
+<div class="music-player">
+  <button class="music-toggle" id="music-toggle" title="チル音楽">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M12 3v10.55A4 4 0 1 0 14 17V7h4V3h-6z"/>
+    </svg>
+  </button>
+  <div>
+    <div class="music-bars" id="music-bars">
+      <span style="height:4px"></span><span style="height:8px"></span>
+      <span style="height:6px"></span><span style="height:4px"></span>
+    </div>
+    <div class="music-label" id="music-label">チル音楽</div>
+  </div>
+</div>
+
+<!-- Modal -->
+<div class="modal-overlay" id="modal">
+  <div class="modal">
+    <h2>着席する</h2>
+    <div class="modal-sub" id="modal-desk-label">席 No.1</div>
+    <div class="form-group">
+      <label>名前</label>
+      <input type="text" id="input-name" placeholder="あなたの名前" maxlength="20" />
+    </div>
+    <div class="form-group">
+      <label>作業内容</label>
+      <input type="text" id="input-task" placeholder="今日やること..." maxlength="40" />
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" id="modal-cancel">キャンセル</button>
+      <button class="btn btn-primary"   id="modal-submit">着席する</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<div id="leave-panel">
+  <span id="leave-seat-info">席 <strong id="leave-seat-no">—</strong> で作業中</span>
+  <button id="leave-btn-main">退室する</button>
+</div>
+
+<div class="cam-hint">ドラッグ: 視点回転<br>スクロール: ズーム</div>
+
+<!-- Admin Panel -->
+<div id="admin-panel">
+  <button id="admin-toggle">⚙ 管理</button>
+  <div id="admin-content">
+    <div class="admin-title">自動着席モード</div>
+    <label class="fill-mode-label">
+      <input type="radio" name="fill-mode" value="center" checked>
+      <span class="mode-icon">⭕</span>丸テーブルの残り3席を埋める
+    </label>
+    <label class="fill-mode-label">
+      <input type="radio" name="fill-mode" value="corners">
+      <span class="mode-icon">◼</span>隅のテーブル4席を埋める
+    </label>
+    <div class="admin-status">着席先: <span id="admin-mode-label">丸テーブル</span></div>
+
+    <div class="admin-title" style="margin-top:14px;">ボット作業内容</div>
+    <label class="fill-mode-label">
+      <input type="radio" name="task-mode" value="math" checked>
+      <span class="mode-icon">🔢</span>計算
+    </label>
+    <label class="fill-mode-label">
+      <input type="radio" name="task-mode" value="reading">
+      <span class="mode-icon">📖</span>読書
+    </label>
+    <div class="admin-status">作業内容: <span id="admin-task-label">計算</span></div>
+  </div>
+</div>
+
+<div id="setup-overlay">
+  <h1>🔧 Firebase の設定が必要です</h1>
+  <p>以下の手順で Firebase Realtime Database を接続してください。</p>
+  <code>1. https://console.firebase.google.com/ でプロジェクトを作成
+2. Realtime Database を有効化（テストモードで開始）
+3. プロジェクトの設定 → マイアプリ → ウェブアプリ追加 → SDK を取得
+4. FIREBASE_CONFIG にコピペしてリロード</code>
+  <a href="https://console.firebase.google.com/" target="_blank" rel="noopener">Firebase Console を開く →</a>
+</div>
+
+<script>
+// ════════════════════════════════════════════════════════
+//  Constants & Helpers
+// ════════════════════════════════════════════════════════
+const TOTAL_SEATS = 8;
+const MY_SEAT_KEY = 'studyroom_round_v1';
+
+// seats 1-4 = center round table (0-indexed 0-3)
+// seats 5-8 = corner tables     (0-indexed 4-7)
+const CENTER_SEATS = [0, 1, 2, 3];
+const CORNER_SEATS = [4, 5, 6, 7];
+
+const BOT_NAMES = ['田中 蓮', '佐藤 葵', '鈴木 颯', '高橋 結', '伊藤 湊', '渡辺 陽', '山本 凛', '中村 悠'];
+const BOT_TASKS = {
+  math:    ['数学演習', '計算ドリル', '微分・積分', '確率統計', '数列練習', '図形問題', '方程式演習', '数値計算'],
+  reading: ['読書中', '小説を読む', 'ノート整理', '参考書精読', '論文読解', '歴史書を読む', '哲学書を読む', '語彙強化'],
+};
+
+function getBotData(idx) {
+  const tasks = BOT_TASKS[currentTaskMode] || BOT_TASKS.math;
+  return {
+    occupied: true,
+    name: BOT_NAMES[idx % BOT_NAMES.length],
+    task: tasks[idx % tasks.length],
+    joinedAt: Date.now(),
+    isBot: true,
+  };
+}
+
+let currentFillMode = 'center';
+let currentTaskMode = 'math';
+let _autoFillRunning = false;
+
+const AVATAR_COLORS = [
+  ['#667eea','#764ba2'], ['#f093fb','#f5576c'],
+  ['#4facfe','#00f2fe'], ['#43e97b','#38f9d7'],
+  ['#fa709a','#fee140'], ['#a18cd1','#fbc2eb'],
+  ['#fccb90','#d57eeb'], ['#a1c4fd','#c2e9fb'],
+];
+
+function getAvatarColor(name) {
+  let h = 0;
+  for (const c of name) h = (h * 31 + c.charCodeAt(0)) & 0xffffffff;
+  const [a, b] = AVATAR_COLORS[Math.abs(h) % AVATAR_COLORS.length];
+  return `linear-gradient(135deg, ${a}, ${b})`;
+}
+
+function getAvatarColorHex(name) {
+  let h = 0;
+  for (const c of name) h = (h * 31 + c.charCodeAt(0)) & 0xffffffff;
+  return AVATAR_COLORS[Math.abs(h) % AVATAR_COLORS.length][0];
+}
+
+function initials(name) { return name.trim().slice(0, 2).toUpperCase() || '?'; }
+
+function escHtml(str) {
+  return String(str).replace(/[&<>"']/g,
+    c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+}
+
+// ════════════════════════════════════════════════════════
+//  Session
+// ════════════════════════════════════════════════════════
+function getMySeat()   { return sessionStorage.getItem(MY_SEAT_KEY); }
+function setMySeat(id) { sessionStorage.setItem(MY_SEAT_KEY, String(id)); updateLeavePanel(); }
+function clearMySeat() { sessionStorage.removeItem(MY_SEAT_KEY); updateLeavePanel(); }
+function isSeated()    { return getMySeat() !== null; }
+
+let _lastSeats = [];
+
+function updateLeavePanel() {
+  const panel = document.getElementById('leave-panel');
+  const myId  = getMySeat();
+  if (myId !== null) {
+    const seat = _lastSeats[parseInt(myId) - 1];
+    const info = document.getElementById('leave-seat-info');
+    if (seat && seat.name) {
+      info.innerHTML = `<strong>${escHtml(seat.name)}</strong> さん（No.${myId}）`;
+    } else {
+      info.innerHTML = `席 <strong>No.${myId}</strong> で作業中`;
+    }
+    panel.style.display = 'flex';
+  } else {
+    panel.style.display = 'none';
+  }
+}
+
+// ════════════════════════════════════════════════════════
+//  Three.js — Scene & Renderer
+// ════════════════════════════════════════════════════════
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x080200);
+scene.fog        = new THREE.FogExp2(0x060100, 0.030);
+
+const camera = new THREE.PerspectiveCamera(48, window.innerWidth / window.innerHeight, 0.1, 100);
+camera.position.set(0, 14, 18);
+camera.lookAt(0, 0, 0);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type    = THREE.PCFSoftShadowMap;
+renderer.toneMapping       = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.18;
+document.body.appendChild(renderer.domElement);
+
+const labelRenderer = new THREE.CSS2DRenderer();
+labelRenderer.setSize(window.innerWidth, window.innerHeight);
+Object.assign(labelRenderer.domElement.style, {
+  position: 'fixed', top: '0', left: '0',
+  width: '100%', height: '100%',
+  pointerEvents: 'none', overflow: 'hidden',
+});
+document.body.appendChild(labelRenderer.domElement);
+
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.enableDamping  = true;
+controls.dampingFactor  = 0.06;
+controls.maxPolarAngle  = Math.PI / 2.08;
+controls.minDistance    = 6;
+controls.maxDistance    = 28;
+controls.target.set(0, 1, 0);
+
+// ════════════════════════════════════════════════════════
+//  Lighting
+// ════════════════════════════════════════════════════════
+scene.add(new THREE.AmbientLight(0xffeedd, 0.55));
+
+const sunLight = new THREE.DirectionalLight(0xc5e8ff, 1.1);
+sunLight.position.set(-11, 9, 5);
+sunLight.castShadow = true;
+sunLight.shadow.mapSize.set(1024, 1024);
+const sc = sunLight.shadow.camera;
+sc.left = sc.bottom = -14; sc.right = sc.top = 14;
+sc.near = 0.5; sc.far = 40;
+scene.add(sunLight);
+
+// Back-left and back-right for corners; centre above round table
+const pl1 = new THREE.PointLight(0xffe898, 2.2, 16);
+pl1.position.set(-4, 4.1, -1);
+scene.add(pl1);
+
+const pl2 = new THREE.PointLight(0xffe898, 2.2, 16);
+pl2.position.set(4, 4.1, -1);
+scene.add(pl2);
+
+const pl3 = new THREE.PointLight(0xffe898, 2.6, 12);
+pl3.position.set(0, 4.8, 0);
+scene.add(pl3);
+
+// ════════════════════════════════════════════════════════
+//  Room — Floor, Walls, Ceiling
+// ════════════════════════════════════════════════════════
+const RW = 20, RD = 16, RH = 5.5;
+
+(function () {
+  const cvs = document.createElement('canvas');
+  cvs.width = cvs.height = 512;
+  const ctx = cvs.getContext('2d');
+  ctx.fillStyle = '#6b4018';
+  ctx.fillRect(0, 0, 512, 512);
+  for (let x = 0; x < 512; x += 70) {
+    ctx.strokeStyle = 'rgba(0,0,0,0.09)'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, 512); ctx.stroke();
+  }
+  for (let i = 0; i < 280; i++) {
+    ctx.strokeStyle = `rgba(${Math.random() > 0.5 ? '240,210,130' : '0,0,0'},${(Math.random() * 0.03).toFixed(3)})`;
+    ctx.lineWidth = Math.random() * 0.5;
+    const y = Math.random() * 512;
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(512, y + (Math.random() - 0.5) * 8); ctx.stroke();
+  }
+  const tex = new THREE.CanvasTexture(cvs);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(4, 3);
+  const floor = new THREE.Mesh(
+    new THREE.PlaneGeometry(RW, RD),
+    new THREE.MeshLambertMaterial({ map: tex })
+  );
+  floor.rotation.x = -Math.PI / 2;
+  floor.receiveShadow = true;
+  scene.add(floor);
+})();
+
+const wallMat = new THREE.MeshLambertMaterial({ color: 0xbf8e5e });
+
+const backWall = new THREE.Mesh(new THREE.PlaneGeometry(RW, RH), wallMat);
+backWall.position.set(0, RH / 2, -RD / 2);
+backWall.receiveShadow = true;
+scene.add(backWall);
+
+const leftWall = new THREE.Mesh(new THREE.PlaneGeometry(RD, RH), wallMat.clone());
+leftWall.rotation.y = Math.PI / 2;
+leftWall.position.set(-RW / 2, RH / 2, 0);
+leftWall.receiveShadow = true;
+scene.add(leftWall);
+
+const rightWall = new THREE.Mesh(new THREE.PlaneGeometry(RD, RH), wallMat.clone());
+rightWall.rotation.y = -Math.PI / 2;
+rightWall.position.set(RW / 2, RH / 2, 0);
+rightWall.receiveShadow = true;
+scene.add(rightWall);
+
+const ceil = new THREE.Mesh(
+  new THREE.PlaneGeometry(RW, RD),
+  new THREE.MeshLambertMaterial({ color: 0x160902 })
+);
+ceil.rotation.x = Math.PI / 2;
+ceil.position.y = RH;
+scene.add(ceil);
+
+const baseboard = new THREE.Mesh(
+  new THREE.BoxGeometry(RW, 0.22, 0.06),
+  new THREE.MeshLambertMaterial({ color: 0x5c3614 })
+);
+baseboard.position.set(0, 0.11, -RD / 2 + 0.06);
+scene.add(baseboard);
+
+// ════════════════════════════════════════════════════════
+//  Window (left wall)
+// ════════════════════════════════════════════════════════
+(function () {
+  const wx = -RW / 2 + 0.04, wy = 3.0, wz = -2.5;
+  const wW = 2.2, wH = 2.8;
+
+  const glass = new THREE.Mesh(
+    new THREE.PlaneGeometry(wW, wH),
+    new THREE.MeshBasicMaterial({ color: 0xb4deff, transparent: true, opacity: 0.52 })
+  );
+  glass.rotation.y = Math.PI / 2;
+  glass.position.set(wx + 0.03, wy, wz);
+  scene.add(glass);
+
+  const fm = new THREE.MeshLambertMaterial({ color: 0x7a4e28 });
+  const bar = (bw, bh, bd, px, py, pz) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(bw, bh, bd), fm);
+    m.position.set(px, py, pz); scene.add(m);
+  };
+  bar(0.08, wH + 0.16, 0.14, wx, wy, wz - wW / 2);
+  bar(0.08, wH + 0.16, 0.14, wx, wy, wz + wW / 2);
+  bar(0.08, 0.1, wW + 0.16, wx, wy - wH / 2, wz);
+  bar(0.08, 0.1, wW + 0.16, wx, wy + wH / 2, wz);
+  bar(0.08, 0.08, wW, wx, wy, wz);
+  bar(0.08, wH, 0.08, wx, wy, wz);
+
+  const shaft = new THREE.Mesh(
+    new THREE.ConeGeometry(2.0, 6.5, 4, 1, true),
+    new THREE.MeshBasicMaterial({ color: 0xfff0d0, transparent: true, opacity: 0.03, side: THREE.DoubleSide, depthWrite: false })
+  );
+  shaft.rotation.z = -Math.PI / 2;
+  shaft.position.set(wx + 3.8, wy - 1.5, wz);
+  scene.add(shaft);
+
+  const glow = new THREE.Mesh(
+    new THREE.PlaneGeometry(wW * 1.8, wH * 1.8),
+    new THREE.MeshBasicMaterial({ color: 0xbee0ff, transparent: true, opacity: 0.05, depthWrite: false })
+  );
+  glow.rotation.y = Math.PI / 2;
+  glow.position.set(wx + 0.6, wy, wz);
+  scene.add(glow);
+})();
+
+// ════════════════════════════════════════════════════════
+//  Pendant Lights
+// ════════════════════════════════════════════════════════
+function addPendant(x, z, cordLen) {
+  const len = cordLen || 1.1;
+  const cord = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.022, 0.022, len, 6),
+    new THREE.MeshBasicMaterial({ color: 0x3a2010 })
+  );
+  cord.position.set(x, RH - len / 2, z);
+  scene.add(cord);
+
+  const shade = new THREE.Mesh(
+    new THREE.ConeGeometry(0.55, 0.62, 16),
+    new THREE.MeshLambertMaterial({ color: 0x2a1808, side: THREE.DoubleSide })
+  );
+  shade.rotation.x = Math.PI;
+  shade.position.set(x, RH - len - 0.31, z);
+  scene.add(shade);
+
+  const bulb = new THREE.Mesh(
+    new THREE.SphereGeometry(0.11, 8, 8),
+    new THREE.MeshBasicMaterial({ color: 0xffe880 })
+  );
+  bulb.position.set(x, RH - len - 0.70, z);
+  scene.add(bulb);
+}
+
+// Centre chandelier (longer cord to hang lower, more dramatic)
+addPendant(0, 0, 1.6);
+// Side pendants for corner area lighting
+addPendant(-3.5, -2, 1.1);
+addPendant( 3.5, -2, 1.1);
+
+// ════════════════════════════════════════════════════════
+//  Table & Chair Geometry
+// ════════════════════════════════════════════════════════
+const DESK_TOP_Y   = 0.86;
+const CHAIR_SEAT_Y = 0.39; // DESK_TOP_Y - 0.47
+
+// Round table: returns { top, topMat } for raycasting & emissive
+function createRoundTable(cx, cz, radius) {
+  const topMat = new THREE.MeshLambertMaterial({ color: 0x3b2208 });
+  const top = new THREE.Mesh(
+    new THREE.CylinderGeometry(radius, radius, 0.08, 32),
+    topMat
+  );
+  top.position.set(cx, DESK_TOP_Y, cz);
+  top.castShadow = top.receiveShadow = true;
+  scene.add(top);
+
+  // Pedestal leg
+  const legH = DESK_TOP_Y - 0.04;
+  const leg = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.07, 0.13, legH, 12),
+    new THREE.MeshLambertMaterial({ color: 0x1e0e04 })
+  );
+  leg.position.set(cx, legH / 2, cz);
+  leg.castShadow = true;
+  scene.add(leg);
+
+  // Foot disc
+  const base = new THREE.Mesh(
+    new THREE.CylinderGeometry(radius * 0.55, radius * 0.65, 0.05, 16),
+    new THREE.MeshLambertMaterial({ color: 0x1e0e04 })
+  );
+  base.position.set(cx, 0.025, cz);
+  scene.add(base);
+
+  return { top, topMat };
+}
+
+// Chair at (x, CHAIR_SEAT_Y, z), rotated so the back faces away from the table.
+// Person faces local +Z → rot = atan2(dx, dz) toward table center.
+function createChairAt(x, z, rot) {
+  const g      = new THREE.Group();
+  const seatM  = new THREE.MeshLambertMaterial({ color: 0x1e1a14 });
+  const backM  = new THREE.MeshLambertMaterial({ color: 0x17120e });
+  const legM   = new THREE.MeshLambertMaterial({ color: 0x2e2820 });
+
+  // Seat cushion
+  const seat = new THREE.Mesh(new THREE.BoxGeometry(0.88, 0.06, 0.88), seatM);
+  seat.castShadow = seat.receiveShadow = true;
+  g.add(seat);
+
+  // Back rest (behind person, i.e. local −Z = away from table)
+  const back = new THREE.Mesh(new THREE.BoxGeometry(0.88, 0.52, 0.06), backM);
+  back.position.set(0, 0.26, -0.46);
+  back.castShadow = true;
+  g.add(back);
+
+  // Four legs
+  const clGeo = new THREE.BoxGeometry(0.05, 0.46, 0.05);
+  [[-0.36, -0.40], [-0.36, 0.40], [0.36, -0.40], [0.36, 0.40]].forEach(([lx, lz2]) => {
+    const cl = new THREE.Mesh(clGeo, legM);
+    cl.position.set(lx, -0.23, lz2);
+    g.add(cl);
+  });
+
+  g.position.set(x, CHAIR_SEAT_Y, z);
+  g.rotation.y = rot;
+  scene.add(g);
+}
+
+// ════════════════════════════════════════════════════════
+//  Table Instances
+// ════════════════════════════════════════════════════════
+const CENTER_TABLE_RADIUS = 1.5;
+const CORNER_TABLE_RADIUS = 0.8;
+const CD = 1.8; // centre-table chair distance from origin
+
+const centerTable = createRoundTable(0, 0, CENTER_TABLE_RADIUS);
+
+const CORNER_TABLE_POS = [
+  { x: -7.0, z: -5.5 }, // TL
+  { x:  7.0, z: -5.5 }, // TR
+  { x: -7.0, z:  5.5 }, // BL
+  { x:  7.0, z:  5.5 }, // BR
+];
+const cornerTables = CORNER_TABLE_POS.map(p => createRoundTable(p.x, p.z, CORNER_TABLE_RADIUS));
+
+// ════════════════════════════════════════════════════════
+//  Seat Layout
+//  rot = atan2(dx, dz) so figure's local +Z faces the table center
+// ════════════════════════════════════════════════════════
+const SEAT_POS = [
+  // Centre round table (4 seats)
+  { x:  0,   z: -CD,  rot:  0             }, // 1 N
+  { x:  CD,  z:  0,   rot: -Math.PI / 2   }, // 2 E
+  { x:  0,   z:  CD,  rot:  Math.PI       }, // 3 S
+  { x: -CD,  z:  0,   rot:  Math.PI / 2   }, // 4 W
+  // Corner tables (1 seat each, chair on room-centre side, facing corner)
+  { x: -6.0, z: -4.5, rot: -Math.PI * 3/4 }, // 5 TL
+  { x:  6.0, z: -4.5, rot:  Math.PI * 3/4 }, // 6 TR
+  { x: -6.0, z:  4.5, rot: -Math.PI / 4   }, // 7 BL
+  { x:  6.0, z:  4.5, rot:  Math.PI / 4   }, // 8 BR
+];
+
+// Create chairs for every seat
+SEAT_POS.forEach(p => createChairAt(p.x, p.z, p.rot));
+
+// ════════════════════════════════════════════════════════
+//  Raycasting — table-top → seat indices mapping
+// ════════════════════════════════════════════════════════
+const allTableTops = [centerTable.top, ...cornerTables.map(t => t.top)];
+const tableToSeats = new Map([
+  [centerTable.top,      [0, 1, 2, 3]],
+  [cornerTables[0].top,  [4]],
+  [cornerTables[1].top,  [5]],
+  [cornerTables[2].top,  [6]],
+  [cornerTables[3].top,  [7]],
+]);
+
+// ════════════════════════════════════════════════════════
+//  Label 3D Positions
+//  Centre seats pushed outward so cards don't overlap each other.
+// ════════════════════════════════════════════════════════
+const LABEL_POS = [
+  // Centre table
+  { x:  0.0, y: DESK_TOP_Y + 2.2, z: -2.4 }, // 1 N
+  { x:  2.8, y: DESK_TOP_Y + 1.8, z:  0.0 }, // 2 E
+  { x:  0.0, y: DESK_TOP_Y + 1.4, z:  2.4 }, // 3 S
+  { x: -2.8, y: DESK_TOP_Y + 1.8, z:  0.0 }, // 4 W
+  // Corner tables
+  { x: -6.5, y: DESK_TOP_Y + 1.6, z: -4.5 }, // 5 TL
+  { x:  6.5, y: DESK_TOP_Y + 1.6, z: -4.5 }, // 6 TR
+  { x: -6.5, y: DESK_TOP_Y + 1.4, z:  4.5 }, // 7 BL
+  { x:  6.5, y: DESK_TOP_Y + 1.4, z:  4.5 }, // 8 BR
+];
+
+// ════════════════════════════════════════════════════════
+//  Avatar Figures — human-shaped 3D figure per seat
+// ════════════════════════════════════════════════════════
+function createHumanFigure() {
+  const g   = new THREE.Group();
+  const mat = new THREE.MeshLambertMaterial({
+    color:             0x667eea,
+    emissive:          new THREE.Color(0x000000),
+    emissiveIntensity: 0,
+  });
+
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.1, 14, 10), mat);
+  head.position.y = 0.40;
+  head.castShadow = true;
+  g.add(head);
+
+  const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.085, 0.1, 0.26, 8), mat);
+  torso.position.y = 0.13;
+  torso.castShadow = true;
+  g.add(torso);
+
+  const armGeo = new THREE.CylinderGeometry(0.038, 0.03, 0.22, 6);
+
+  const lArm = new THREE.Mesh(armGeo, mat);
+  lArm.position.set(-0.16, 0.22, 0.04);
+  lArm.rotation.set(-Math.PI / 8, 0,  Math.PI / 5.5);
+  lArm.castShadow = true;
+  g.add(lArm);
+
+  const rArm = new THREE.Mesh(armGeo, mat);
+  rArm.position.set(0.16, 0.22, 0.04);
+  rArm.rotation.set(-Math.PI / 8, 0, -Math.PI / 5.5);
+  rArm.castShadow = true;
+  g.add(rArm);
+
+  const thighGeo = new THREE.CylinderGeometry(0.052, 0.042, 0.22, 6);
+
+  const lThigh = new THREE.Mesh(thighGeo, mat);
+  lThigh.position.set(-0.065, -0.02, 0.11);
+  lThigh.rotation.x = -Math.PI / 2;
+  lThigh.castShadow = true;
+  g.add(lThigh);
+
+  const rThigh = new THREE.Mesh(thighGeo, mat);
+  rThigh.position.set(0.065, -0.02, 0.11);
+  rThigh.rotation.x = -Math.PI / 2;
+  rThigh.castShadow = true;
+  g.add(rThigh);
+
+  const lowerGeo = new THREE.CylinderGeometry(0.044, 0.034, 0.22, 6);
+
+  const lLower = new THREE.Mesh(lowerGeo, mat);
+  lLower.position.set(-0.065, -0.15, 0.22);
+  lLower.castShadow = true;
+  g.add(lLower);
+
+  const rLower = new THREE.Mesh(lowerGeo, mat);
+  rLower.position.set(0.065, -0.15, 0.22);
+  rLower.castShadow = true;
+  g.add(rLower);
+
+  return { group: g, mat };
+}
+
+// Place each figure directly at chair position with per-seat rotation
+const avatarFigures = SEAT_POS.map(p => {
+  const { group, mat } = createHumanFigure();
+  group.position.set(p.x, CHAIR_SEAT_Y, p.z);
+  group.rotation.y = p.rot;
+  group.scale.setScalar(0);
+  scene.add(group);
+  return { group, mat };
+});
+
+const orbSprings = SEAT_POS.map(() => ({ s: 0, v: 0, target: 0 }));
+
+const clock = new THREE.Clock();
+
+// ════════════════════════════════════════════════════════
+//  CSS2D Floating Seat Cards
+// ════════════════════════════════════════════════════════
+const seatCards = [];
+
+SEAT_POS.forEach((p, i) => {
+  const div = document.createElement('div');
+  div.className = 'seat-card empty';
+  div.innerHTML = `<div class="sc-no">No.${i + 1}</div><div class="sc-plus">+</div><div class="sc-empty">空席</div>`;
+  div.addEventListener('click', e => {
+    e.stopPropagation();
+    if (div.classList.contains('empty')) openModal(i + 1);
+  });
+
+  const obj = new THREE.CSS2DObject(div);
+  const lp  = LABEL_POS[i];
+  obj.position.set(lp.x, lp.y, lp.z);
+  scene.add(obj);
+
+  seatCards.push(div);
+});
+
+function updateSeatCard(i, seat) {
+  const div = seatCards[i];
+  const sp  = orbSprings[i];
+  const wasOccupied = sp.target > 0.5;
+
+  if (seat.occupied) {
+    const hexCol = getAvatarColorHex(seat.name);
+    avatarFigures[i].mat.color.set(hexCol);
+    avatarFigures[i].mat.emissive.set(hexCol);
+    avatarFigures[i].mat.emissiveIntensity = 0.35;
+    sp.target = 1;
+
+    const cssCol = getAvatarColor(seat.name);
+    div.className = 'seat-card';
+    div.innerHTML = `
+      <div class="sc-no">No.${i + 1}</div>
+      <div class="sc-avatar" style="background:${cssCol}">${initials(seat.name)}</div>
+      <div class="sc-name">${escHtml(seat.name)}</div>
+      <div class="sc-task">${escHtml(seat.task) || '作業中...'}</div>
+      <div class="sc-dot"></div>`;
+
+    if (!wasOccupied) {
+      requestAnimationFrame(() => {
+        div.classList.add('arrive');
+        div.addEventListener('animationend', () => div.classList.remove('arrive'), { once: true });
+      });
+    }
+  } else {
+    if (wasOccupied) {
+      div.classList.add('leave');
+      div.addEventListener('animationend', () => {
+        if (orbSprings[i].target > 0.5) return; // re-occupied before animation ended
+        div.className = 'seat-card empty';
+        div.innerHTML = `<div class="sc-no">No.${i + 1}</div><div class="sc-plus">+</div><div class="sc-empty">空席</div>`;
+      }, { once: true });
+    } else {
+      div.className = 'seat-card empty';
+      div.innerHTML = `<div class="sc-no">No.${i + 1}</div><div class="sc-plus">+</div><div class="sc-empty">空席</div>`;
+    }
+    sp.target = 0;
+  }
+}
+
+// Emissive glow on table tops (called once per render cycle, not per seat)
+function updateAllTableEmissives(seats) {
+  const anyCenter = CENTER_SEATS.some(i => seats[i]?.occupied);
+  centerTable.topMat.emissive.set(anyCenter ? 0x221100 : 0x000000);
+  centerTable.topMat.emissiveIntensity = anyCenter ? 0.38 : 0;
+
+  cornerTables.forEach((ct, j) => {
+    const occupied = seats[CORNER_SEATS[j]]?.occupied;
+    ct.topMat.emissive.set(occupied ? 0x221100 : 0x000000);
+    ct.topMat.emissiveIntensity = occupied ? 0.38 : 0;
+  });
+}
+
+// ════════════════════════════════════════════════════════
+//  Render — driven by Firebase updates
+// ════════════════════════════════════════════════════════
+function render(seats) {
+  document.getElementById('people-count').textContent =
+    `${seats.filter(s => s.occupied).length}人 在室`;
+  seats.forEach((seat, i) => updateSeatCard(i, seat));
+  updateAllTableEmissives(seats);
+}
+
+// ════════════════════════════════════════════════════════
+//  Raycasting — click / hover on round table tops
+// ════════════════════════════════════════════════════════
+const raycaster = new THREE.Raycaster();
+const _mouse    = new THREE.Vector2();
+let   _dragged  = false;
+
+renderer.domElement.addEventListener('mousedown', () => { _dragged = false; });
+renderer.domElement.addEventListener('mousemove', e => {
+  if (e.buttons > 0) { _dragged = true; return; }
+  _mouse.set(
+    (e.clientX / window.innerWidth)  * 2 - 1,
+    -(e.clientY / window.innerHeight) * 2 + 1
+  );
+  raycaster.setFromCamera(_mouse, camera);
+  const hits = raycaster.intersectObjects(allTableTops);
+  if (hits.length) {
+    const idxs   = tableToSeats.get(hits[0].object);
+    const hasOpen = idxs && idxs.some(i => _lastSeats[i] && !_lastSeats[i].occupied);
+    renderer.domElement.style.cursor = hasOpen ? 'pointer' : 'default';
+  } else {
+    renderer.domElement.style.cursor = 'default';
+  }
+});
+
+renderer.domElement.addEventListener('click', e => {
+  if (_dragged) return;
+  _mouse.set(
+    (e.clientX / window.innerWidth)  * 2 - 1,
+    -(e.clientY / window.innerHeight) * 2 + 1
+  );
+  raycaster.setFromCamera(_mouse, camera);
+  const hits = raycaster.intersectObjects(allTableTops);
+  if (hits.length) {
+    const idxs = tableToSeats.get(hits[0].object);
+    if (idxs) {
+      const emptyIdx = idxs.find(i => _lastSeats[i] && !_lastSeats[i].occupied && !_lastSeats[i].isBot);
+      if (emptyIdx !== undefined) openModal(emptyIdx + 1);
+    }
+  }
+});
+
+// ════════════════════════════════════════════════════════
+//  Firebase
+// ════════════════════════════════════════════════════════
+const isConfigured = FIREBASE_CONFIG.apiKey && FIREBASE_CONFIG.apiKey !== 'YOUR_API_KEY';
+let db = null, seatsRef = null, configRef = null;
+
+// ════════════════════════════════════════════════════════
+//  Auto-fill logic
+// ════════════════════════════════════════════════════════
+function handleAutoFill(seats) {
+  if (!seatsRef) return;
+  if (_autoFillRunning) return;
+
+  const realCenter = CENTER_SEATS.filter(i => seats[i]?.occupied && !seats[i]?.isBot);
+  const updates = {};
+
+  if (realCenter.length > 0) {
+    if (currentFillMode === 'center') {
+      let botIdx = 0;
+      CENTER_SEATS.forEach(i => {
+        if (!seats[i]?.occupied) updates[String(i + 1)] = getBotData(botIdx++);
+      });
+      CORNER_SEATS.forEach(i => {
+        if (seats[i]?.isBot) updates[String(i + 1)] = { occupied: false, name: '', task: '', joinedAt: null };
+      });
+    } else {
+      let botIdx = 0;
+      CORNER_SEATS.forEach(i => {
+        if (!seats[i]?.occupied) updates[String(i + 1)] = getBotData(botIdx++);
+      });
+      CENTER_SEATS.forEach(i => {
+        if (seats[i]?.isBot) updates[String(i + 1)] = { occupied: false, name: '', task: '', joinedAt: null };
+      });
+    }
+  } else {
+    [...CENTER_SEATS, ...CORNER_SEATS].forEach(i => {
+      if (seats[i]?.isBot) updates[String(i + 1)] = { occupied: false, name: '', task: '', joinedAt: null };
+    });
+  }
+
+  if (Object.keys(updates).length > 0) {
+    _autoFillRunning = true;
+    seatsRef.update(updates).then(() => { _autoFillRunning = false; }).catch(() => { _autoFillRunning = false; });
+  }
+}
+
+if (isConfigured) {
+  document.getElementById('setup-overlay').style.display = 'none';
+
+  firebase.initializeApp(FIREBASE_CONFIG);
+  db        = firebase.database();
+  seatsRef  = db.ref('seats_round');
+  configRef = db.ref('config_round');
+
+  seatsRef.once('value', snap => {
+    if (!snap.exists()) {
+      const init = {};
+      for (let i = 1; i <= TOTAL_SEATS; i++)
+        init[i] = { occupied: false, name: '', task: '', joinedAt: null };
+      seatsRef.set(init);
+    }
+  });
+
+  configRef.child('fillMode').on('value', snap => {
+    currentFillMode = snap.val() || 'center';
+    const radio = document.querySelector(`input[name="fill-mode"][value="${currentFillMode}"]`);
+    if (radio) radio.checked = true;
+    document.getElementById('admin-mode-label').textContent =
+      currentFillMode === 'center' ? '丸テーブル' : '隅';
+  });
+
+  configRef.child('taskMode').on('value', snap => {
+    currentTaskMode = snap.val() || 'math';
+    const radio = document.querySelector(`input[name="task-mode"][value="${currentTaskMode}"]`);
+    if (radio) radio.checked = true;
+    document.getElementById('admin-task-label').textContent =
+      currentTaskMode === 'math' ? '計算' : '読書';
+  });
+
+  seatsRef.on('value', snap => {
+    const data  = snap.val() || {};
+    const seats = [];
+    for (let i = 1; i <= TOTAL_SEATS; i++)
+      seats.push(data[i] || { occupied: false, name: '', task: '', joinedAt: null });
+    _lastSeats = seats;
+    const mySeat = getMySeat();
+    if (mySeat !== null) {
+      const s = seats[parseInt(mySeat) - 1];
+      if (!s || !s.occupied) clearMySeat();
+    }
+    render(seats);
+    updateLeavePanel();
+    handleAutoFill(seats);
+  });
+
+  db.ref('.info/connected').on('value', snap => {
+    const badge = document.getElementById('conn-badge');
+    document.getElementById('conn-label').textContent = snap.val() ? 'オンライン' : 'オフライン';
+    badge.className = 'conn-badge ' + (snap.val() ? 'online' : 'offline');
+  });
+
+  window.addEventListener('beforeunload', () => {
+    const id = getMySeat();
+    if (id && seatsRef)
+      seatsRef.child(id).set({ occupied: false, name: '', task: '', joinedAt: null });
+  });
+}
+
+// ════════════════════════════════════════════════════════
+//  Modal
+// ════════════════════════════════════════════════════════
+let selectedSeatId = null;
+const modal     = document.getElementById('modal');
+const inputName = document.getElementById('input-name');
+const inputTask = document.getElementById('input-task');
+const modalDesk = document.getElementById('modal-desk-label');
+const submitBtn = document.getElementById('modal-submit');
+const cancelBtn = document.getElementById('modal-cancel');
+
+function openModal(id) {
+  if (isSeated()) { showToast('すでに着席中です。退室してから移動してください'); return; }
+  if (_lastSeats[id - 1]?.isBot) return;
+  selectedSeatId = id;
+  const label = id <= 4 ? `丸テーブル No.${id}` : `隅テーブル No.${id}`;
+  modalDesk.textContent = label;
+  inputName.value = ''; inputTask.value = '';
+  modal.classList.add('open');
+  setTimeout(() => inputName.focus(), 100);
+}
+
+function closeModal() { modal.classList.remove('open'); selectedSeatId = null; }
+
+cancelBtn.addEventListener('click', closeModal);
+modal.addEventListener('click', e => { if (e.target === modal) closeModal(); });
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeModal();
+  if (e.key === 'Enter' && modal.classList.contains('open')) submitSeat();
+});
+submitBtn.addEventListener('click', submitSeat);
+
+function submitSeat() {
+  if (!db) return;
+  if (isSeated()) { showToast('すでに着席中です'); closeModal(); return; }
+  const name = inputName.value.trim();
+  const task = inputTask.value.trim();
+  if (!name) { inputName.focus(); return; }
+  const id = selectedSeatId;
+  closeModal();
+  seatsRef.child(String(id)).transaction(cur => {
+    if (cur && cur.occupied) return;
+    return { occupied: true, name, task, joinedAt: Date.now() };
+  }, (err, committed) => {
+    if (!err && committed) { setMySeat(id); showToast(`${name} さんが着席しました`); }
+    else                   { showToast('この席はすでに埋まっています'); }
+  });
+}
+
+function leaveSeat(id) {
+  if (!db) return;
+  const name = _lastSeats[id - 1]?.name || '';
+  seatsRef.child(String(id)).set({ occupied: false, name: '', task: '', joinedAt: null });
+  clearMySeat();
+  showToast(`${name} さんが退室しました`);
+}
+
+document.getElementById('leave-btn-main').addEventListener('click', () => {
+  const id = getMySeat();
+  if (id) leaveSeat(parseInt(id));
+});
+
+// ════════════════════════════════════════════════════════
+//  Admin Panel
+// ════════════════════════════════════════════════════════
+document.getElementById('admin-toggle').addEventListener('click', () => {
+  document.getElementById('admin-content').classList.toggle('open');
+});
+
+document.querySelectorAll('input[name="fill-mode"]').forEach(radio => {
+  radio.addEventListener('change', e => {
+    if (configRef) configRef.child('fillMode').set(e.target.value);
+    currentFillMode = e.target.value;
+    document.getElementById('admin-mode-label').textContent =
+      currentFillMode === 'center' ? '丸テーブル' : '隅';
+    handleAutoFill(_lastSeats);
+  });
+});
+
+document.querySelectorAll('input[name="task-mode"]').forEach(radio => {
+  radio.addEventListener('change', e => {
+    if (configRef) configRef.child('taskMode').set(e.target.value);
+    currentTaskMode = e.target.value;
+    document.getElementById('admin-task-label').textContent =
+      currentTaskMode === 'math' ? '計算' : '読書';
+    handleAutoFill(_lastSeats);
+  });
+});
+
+// ════════════════════════════════════════════════════════
+//  Toast
+// ════════════════════════════════════════════════════════
+const toastEl = document.getElementById('toast');
+let toastTimer;
+function showToast(msg) {
+  toastEl.textContent = msg;
+  toastEl.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toastEl.classList.remove('show'), 2800);
+}
+
+// ════════════════════════════════════════════════════════
+//  Clock
+// ════════════════════════════════════════════════════════
+const hudTime = document.getElementById('hud-time');
+const hudDate = document.getElementById('hud-date');
+const WD = ['日','月','火','水','木','金','土'];
+function updateClock() {
+  const n = new Date();
+  hudTime.textContent = `${String(n.getHours()).padStart(2,'0')}:${String(n.getMinutes()).padStart(2,'0')}`;
+  hudDate.textContent = `${n.getFullYear()}年${n.getMonth()+1}月${n.getDate()}日(${WD[n.getDay()]})`;
+}
+setInterval(updateClock, 1000);
+updateClock();
+
+// ════════════════════════════════════════════════════════
+//  Ambient Music
+// ════════════════════════════════════════════════════════
+class LofiAmbient {
+  constructor() {
+    this.ctx=null; this.master=null; this.playing=false; this.nodes=[]; this.sid=null;
+    this.scale=[220,261.6,293.7,329.6,392.0,440,523.3,587.3,659.3,784.0];
+  }
+  _init() {
+    if(this.ctx) return;
+    this.ctx=new(window.AudioContext||window.webkitAudioContext)();
+    this.master=this.ctx.createGain(); this.master.gain.value=0.22;
+    this.master.connect(this.ctx.destination);
+  }
+  _drone() {
+    [55,110,164.8].forEach(f=>{
+      const o=this.ctx.createOscillator(),g=this.ctx.createGain(),flt=this.ctx.createBiquadFilter();
+      o.type='sine'; o.frequency.value=f; flt.type='lowpass'; flt.frequency.value=380; g.gain.value=0.08;
+      o.connect(flt); flt.connect(g); g.connect(this.master); o.start();
+      this.nodes.push(o,g,flt);
+    });
+  }
+  _noise() {
+    const sz=this.ctx.sampleRate*2,buf=this.ctx.createBuffer(1,sz,this.ctx.sampleRate),d=buf.getChannelData(0);
+    let b0=0,b1=0,b2=0,b3=0,b4=0,b5=0,b6=0;
+    for(let i=0;i<sz;i++){const w=Math.random()*2-1;b0=.99886*b0+w*.0555179;b1=.99332*b1+w*.0750759;b2=.969*b2+w*.153852;b3=.8665*b3+w*.3104856;b4=.55*b4+w*.5329522;b5=-.7616*b5-w*.016898;d[i]=(b0+b1+b2+b3+b4+b5+b6+w*.5362)*.11;b6=w*.115926;}
+    const s=this.ctx.createBufferSource(),g=this.ctx.createGain(),flt=this.ctx.createBiquadFilter();
+    s.buffer=buf; s.loop=true; flt.type='lowpass'; flt.frequency.value=600; g.gain.value=0.04;
+    s.connect(flt); flt.connect(g); g.connect(this.master); s.start();
+    this.nodes.push(s,g,flt);
+  }
+  _note(freq,t,dur=1.2) {
+    const o1=this.ctx.createOscillator(),o2=this.ctx.createOscillator(),g=this.ctx.createGain();
+    o1.type='triangle'; o2.type='sine'; o1.frequency.value=freq; o2.frequency.value=freq*2.01;
+    g.gain.setValueAtTime(0,t); g.gain.linearRampToValueAtTime(.14,t+.02); g.gain.exponentialRampToValueAtTime(.001,t+dur);
+    o1.connect(g); o2.connect(g); g.connect(this.master); o1.start(t); o2.start(t); o1.stop(t+dur+.05); o2.stop(t+dur+.05);
+  }
+  _melody() {
+    if(!this.playing) return;
+    const now=this.ctx.currentTime,n=2+Math.floor(Math.random()*3); let t=now;
+    for(let i=0;i<n;i++){this._note(this.scale[Math.floor(Math.random()*this.scale.length)],t,1+Math.random()*1.5); t+=.4+Math.random()*.9;}
+    this.sid=setTimeout(()=>this._melody(),(3+Math.random()*4)*1000);
+  }
+  start() {
+    this._init(); if(this.ctx.state==='suspended') this.ctx.resume();
+    this._drone(); this._noise(); this.playing=true; this._melody();
+  }
+  stop() {
+    this.playing=false; clearTimeout(this.sid);
+    this.nodes.forEach(n=>{try{if(n.stop)n.stop();}catch{}try{n.disconnect();}catch{}});
+    this.nodes=[]; if(this.ctx) this.ctx.suspend();
+  }
+}
+
+const music       = new LofiAmbient();
+const musicToggle = document.getElementById('music-toggle');
+const musicBars   = document.getElementById('music-bars');
+const musicLabel  = document.getElementById('music-label');
+
+musicToggle.addEventListener('click', () => {
+  if (music.playing) {
+    music.stop();
+    musicToggle.classList.remove('playing');
+    musicBars.classList.remove('active');
+    musicLabel.textContent = 'チル音楽';
+  } else {
+    music.start();
+    musicToggle.classList.add('playing');
+    musicBars.classList.add('active');
+    musicLabel.textContent = '再生中...';
+  }
+});
+
+// ════════════════════════════════════════════════════════
+//  Animation Loop
+// ════════════════════════════════════════════════════════
+function animate() {
+  requestAnimationFrame(animate);
+  const t  = Date.now() * 0.001;
+  const dt = Math.min(clock.getDelta(), 0.05);
+
+  pl1.intensity = 2.1 + Math.sin(t * 0.71) * 0.12;
+  pl2.intensity = 2.1 + Math.sin(t * 0.53 + 1.3) * 0.12;
+  pl3.intensity = 2.5 + Math.sin(t * 0.61 + 0.7) * 0.10; // centre table candle flicker
+
+  const K = 320, D = 22;
+  orbSprings.forEach((sp, i) => {
+    const force = K * (sp.target - sp.s) - D * sp.v;
+    sp.v += force * dt;
+    sp.s += sp.v * dt;
+    if (sp.s < 0) { sp.s = 0; sp.v = Math.abs(sp.v) * 0.4; }
+
+    const fig = avatarFigures[i].group;
+    fig.scale.setScalar(sp.s * 2);
+
+    if (sp.target > 0.5) {
+      fig.rotation.z = Math.sin(t * 0.9 + i * 1.1) * 0.018;
+    }
+  });
+
+  controls.update();
+  renderer.render(scene, camera);
+  labelRenderer.render(scene, camera);
+}
+
+animate();
+
+// ════════════════════════════════════════════════════════
+//  Resize
+// ════════════════════════════════════════════════════════
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  labelRenderer.setSize(window.innerWidth, window.innerHeight);
+});
+</script>
+</body>
+</html>
